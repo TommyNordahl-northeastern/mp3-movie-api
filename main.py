@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from src import DatasetInfo, HealthResponse, ValidationSettings, MissingSettings, OutlierSettings
 from src import ProcessingSettings, ProcessConfig, ProcessingReport, HealthResponse, setup_logging, log_requests
 from src import MovieStorage, MovieUploadInfo, MovieDataResponse, MovieProcessingReport
+from src import MovieCache
 from src.storage import MOVIE_COLUMNS
 from data_pipeline import create_cleaning_report, process_data, validate_dataframe
 
@@ -16,11 +17,13 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Data Processing API", version="1.0.0")
 app.middleware("http")(log_requests)
 storage = MovieStorage()
+cache = MovieCache()
 
 @app.get("/health", response_model=HealthResponse)
 def health_check():
     """Return the application status and version."""
     return {"status": "ok", "version": "1.0.0"}
+
 
 @app.post("/upload", response_model=MovieUploadInfo)
 async def upload_movies(file: UploadFile = File(...)):
@@ -56,20 +59,31 @@ async def upload_movies(file: UploadFile = File(...)):
     # Log the filename and saved row count at INFO.
     # Return filename, rows, columns, and column_names for this upload.
     storage.save(df)
+    cache.invalidate()
     logger.debug(f"File saved with filename {file.filename}, and {len(df)} rows")
     return MovieUploadInfo(filename=file.filename, rows=len(df), columns=len(df.columns), column_names=df.columns.to_list())
 
 @app.get("/movies", response_model=MovieDataResponse)
 def get_movies(limit: int = Query(default=100, ge=1)):
-    """Return up to limit rows from a stored dataset."""
-    # TODO: Use MovieStorage methods to retrieve up to limit rows and count the total number of stored movies.
-    # Return {"data": ..., "total_rows": ...}.
-    # If empty, return {"data": [], "total_rows": 0}.
-    # Log the row count at INFO.
+    # TODO 1: Look up the response using cache.get(limit).
+    # If it is not None, log the cache hit at INFO and return it.
+
+    # Keep Part 1's SQL retrieval, total count, and response construction here.
+
+    # TODO 2: Before the existing return, cache the complete response
+    # using cache.set(limit, response).
+    # Keep the existing row-count log and return.
+    cached = cache.get(limit)
+    if cached is not None:
+        logger.info(f"Cache hit! Listed movies: rows={len(cached["data"])}")
+        return cached
     data = storage.select_columns(MOVIE_COLUMNS, limit = limit)
     stored_movies = storage.count_movies()
     logger.info(f"{len(data)} rows retrieved")
-    return MovieDataResponse(data=data, total_rows=stored_movies)
+    response = MovieDataResponse(data=data, total_rows=stored_movies)
+    cache.set(limit=limit, response=response.model_dump())
+    return response
+
 
 @app.get("/movies/search", response_model=list[dict])
 def query_movies(
@@ -87,6 +101,7 @@ def query_movies(
         raise HTTPException(status_code=400, detail="Query failed")
     logger.info(f"{columns} selected with {len(data)} rows")
     return data
+
 
 @app.post(
     "/movies/process",
@@ -140,5 +155,6 @@ def process_dataset(config: ProcessConfig):
     
     # update storage and return MovieProcessingReport
     storage.save(df=data_processed)
+    cache.invalidate()
     logger.info(f"DataFrame processed . {validate_rows_removed} rows removed during validation and {processed_rows_removed} rows removed during processing.")
     return MovieProcessingReport(validation_rows_removed=len(data)-len(data), cleaning_report=cleaning_report)
