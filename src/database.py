@@ -17,12 +17,12 @@ def initialize_database(db_path):
     connection = get_connection(db_path=db_path)
 
     sql_statement = ("""
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS movies (
         id INTEGER PRIMARY KEY,
         title TEXT,
         release_year INTEGER,
-        rating, FLOAT
-        genre, TEXT
+        rating REAL,
+        genre TEXT
     )
     """)
     connection.execute(sql_statement)
