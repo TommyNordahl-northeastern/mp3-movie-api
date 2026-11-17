@@ -36,4 +36,4 @@ class MovieCache:
         """Remove all cached movie retrievals."""
         # TODO: clear this dedicated FakeRedis cache and log at DEBUG.
         self.client.flushdb()
-        logger.debug("Invalidated book query cache")
+        logger.debug("Invalidated movie cache")

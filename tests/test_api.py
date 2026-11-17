@@ -25,24 +25,66 @@ def test_movies_persist(client, test_storage, uploaded_movies):
     assert response.status_code == 200
     api_ids = [row["id"] for row in response.json()["data"]]
     assert db_ids == api_ids
+    assert db_ids == list(range(1,21))
 
 
 def test_cache_and_processing(client, uploaded_movies, processing_body):
     # TODO 1: GET /movies with limits 100 and 1.
     # Check 200 and that main.cache.get(limit) equals each response body.
+    response1 = client.get("/movies", params={"limit": 100})
+    assert response1.status_code == 200
+    assert main.cache.get(100) == response1.json()
+
+    response2 = client.get("/movies", params={"limit": 1})
+    assert response2.status_code == 200
+    assert main.cache.get(1) == response2.json()
+
 
     # TODO 2: repeat limit=100 and check the same response.
+
+    response3 = client.get("/movies", params={"limit": 100})
+    assert response3.status_code == 200
+    assert response3.json() == response1.json()
 
     # TODO 3: POST /movies/process using json=processing_body.
     # Check 200, zero validation removals, and the 20 -> 16 cleaning report.
     # Confirm both old cache entries are None.
 
+    post = client.post("/movies/process", json=processing_body)
+    assert post.status_code == 200
+    report = post.json()
+    assert report["validation_rows_removed"] == 0
+    assert report["cleaning_report"]["rows_before"] == 20
+    assert report["cleaning_report"]["rows_after"] == 16
+    assert report["cleaning_report"]["rows_removed"] == 4
+    assert main.cache.get(100) == None
+    assert main.cache.get(1) == None
+
     # TODO 4: retrieve again; check total_rows=16 and titles Movie A through Movie P, in order.
     # Check IDs 1 through 16 in the retrieved records.
     # Check that the new response is cached.
-    pass
 
+    response4 = client.get("/movies", params={"limit": 100})
+    assert response4.status_code == 200
+    body = response4.json()
+    assert body["total_rows"] == 16
 
+    actual_titles = []
+    expected_titles = [f"Movie {letter}" for letter in "ABCDEFGHIJKLMNOP"]
+    for movie in body["data"]:
+        actual_titles.append(movie["title"])
+
+    assert actual_titles == expected_titles
+
+    actual_ids = []
+    expected_ids = [val + 1 for val in range(16)]
+    for movie in body["data"]:
+        actual_ids.append(movie["id"])
+
+    assert actual_ids == expected_ids
+    assert main.cache.get(100) == body
+
+    
 def test_cache_hit_skips_database(client, uploaded_movies, monkeypatch):
     # TODO 1: GET /movies with limit=100 to populate the cache.
     # Assert 200 and keep the response for comparison.
@@ -53,50 +95,15 @@ def test_cache_hit_skips_database(client, uploaded_movies, monkeypatch):
 
     # TODO 3: Repeat the same GET request.
     # Assert 200 and the same response body as the first request.
-    pass
+    response = client.get("/movies", params={"limit": 100})
+    assert response.status_code == 200
 
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("A cache hit should not query the database")
 
+    monkeypatch.setattr(main.storage, "select_columns", fail_if_called)
+    monkeypatch.setattr(main.storage, "count_movies", fail_if_called)
 
-
-# def test_process_and_retrieve(
-#     client, uploaded_dataset_id, processing_body
-# ):
-#     # TODO 1: Send a POST request to
-#     # /datasets/{uploaded_dataset_id}/process
-#     # using json=processing_body.
-#     # Assert status 200, one validation removal,
-#     # and a cleaning report showing 5 → 3 rows.
-
-#     response = client.post(f"/datasets/{uploaded_dataset_id}/process", json=processing_body)
-#     assert response.status_code == 200
-
-#     data = response.json()
-#     cleaning_report = data["cleaning_report"]
-#     assert data["validation_rows_removed"] == 1
-#     assert cleaning_report["rows_before"] == 5
-#     assert cleaning_report["rows_after"] == 3
-
-#     # TODO 2: GET /datasets/{uploaded_dataset_id}.
-#     # Assert status 200 and total_rows == 3.
-#     # Check that the returned records contain student IDs
-#     # 1, 2, and 5 with scores 80, 90, and 85.
-    
-#     response2 = client.get(f"/datasets/{uploaded_dataset_id}")
-#     assert response2.status_code == 200
-#     data = response2.json()
-#     assert data["total_rows"] == 3
-#     ids = [row["student_id"] for row in data["data"]]
-#     scores = [row["score"] for row in data["data"]]
-#     x = [1,2,5]
-#     y = [80, 90, 85]
-#     for z in x:
-#         assert z in ids
-#     for z in y:
-#         assert z in scores
-
-
-# def test_retrieve_missing_dataset(client):
-#     # TODO: Retrieve a dataset ID that does not exist.
-#     # Assert status 404.
-#     response = client.get(f"/datasets/{999999}")
-#     assert response.status_code == 404
+    response2 = client.get("/movies", params={"limit": 100})
+    assert response2.status_code == 200
+    assert response.json() == response2.json()

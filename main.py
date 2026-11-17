@@ -60,7 +60,7 @@ async def upload_movies(file: UploadFile = File(...)):
     # Return filename, rows, columns, and column_names for this upload.
     storage.save(df)
     cache.invalidate()
-    logger.debug(f"File saved with filename {file.filename}, and {len(df)} rows")
+    logger.info(f"File saved with filename {file.filename}, and {len(df)} rows")
     return MovieUploadInfo(filename=file.filename, rows=len(df), columns=len(df.columns), column_names=df.columns.to_list())
 
 @app.get("/movies", response_model=MovieDataResponse)
@@ -157,4 +157,4 @@ def process_dataset(config: ProcessConfig):
     storage.save(df=data_processed)
     cache.invalidate()
     logger.info(f"DataFrame processed . {validate_rows_removed} rows removed during validation and {processed_rows_removed} rows removed during processing.")
-    return MovieProcessingReport(validation_rows_removed=len(data)-len(data), cleaning_report=cleaning_report)
+    return MovieProcessingReport(validation_rows_removed=validate_rows_removed, cleaning_report=cleaning_report)
